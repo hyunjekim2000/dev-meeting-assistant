@@ -27,7 +27,9 @@ export function TicketReview({ summaryMarkdown, onTicketsCreated, onClose }: Tic
   const [error, setError] = React.useState<string | null>(null);
   const [success, setSuccess] = React.useState<string | null>(null);
 
-  const isConfigured = ettService.isConfigured();
+  const hasApiUrl = ettService.hasApiUrl();
+  const authState = ettService.getAuthState();
+  const isReady = hasApiUrl && authState.isAuthenticated;
 
   React.useEffect(() => {
     // Parse tickets from summary
@@ -42,11 +44,11 @@ export function TicketReview({ summaryMarkdown, onTicketsCreated, onClose }: Tic
       }))
     );
 
-    // Load boards if configured
-    if (isConfigured) {
+    // Load boards if authenticated
+    if (isReady) {
       loadBoards();
     }
-  }, [summaryMarkdown, isConfigured]);
+  }, [summaryMarkdown, isReady]);
 
   const loadBoards = async () => {
     setIsLoading(true);
@@ -54,11 +56,8 @@ export function TicketReview({ summaryMarkdown, onTicketsCreated, onClose }: Tic
       const boardList = await ettService.getBoards();
       setBoards(boardList);
 
-      // Set default board from config
-      const config = ettService.getConfig();
-      if (config?.defaultBoardId) {
-        setSelectedBoardId(config.defaultBoardId);
-      } else if (boardList.length > 0) {
+      // Select first board by default
+      if (boardList.length > 0) {
         setSelectedBoardId(boardList[0].id);
       }
     } catch (err) {
@@ -91,9 +90,9 @@ export function TicketReview({ summaryMarkdown, onTicketsCreated, onClose }: Tic
       return;
     }
 
-    const config = ettService.getConfig();
-    if (!config?.defaultReporterId) {
-      setError('Please configure a default reporter ID in settings');
+    const currentAuth = ettService.getAuthState();
+    if (!currentAuth.userId) {
+      setError('Please log in to create tickets');
       return;
     }
 
@@ -108,7 +107,7 @@ export function TicketReview({ summaryMarkdown, onTicketsCreated, onClose }: Tic
         description: t.description,
         priority: t.priority,
         status: 'backlog',
-        reporter_id: config.defaultReporterId!,
+        reporter_id: currentAuth.userId!,
       }));
 
       await ettService.createIssues(issues);
@@ -131,11 +130,21 @@ export function TicketReview({ summaryMarkdown, onTicketsCreated, onClose }: Tic
     none: 'bg-gray-100 text-gray-700 border-gray-200',
   };
 
-  if (!isConfigured) {
+  if (!hasApiUrl) {
     return (
       <div className="p-4 border rounded-lg bg-yellow-50 border-yellow-200">
         <p className="text-yellow-800">
-          Issue tracker not configured. Go to Settings to connect your issue tracker.
+          Issue tracker API not configured. Set <code>NEXT_PUBLIC_ETT_API_URL</code> in .env file.
+        </p>
+      </div>
+    );
+  }
+
+  if (!authState.isAuthenticated) {
+    return (
+      <div className="p-4 border rounded-lg bg-yellow-50 border-yellow-200">
+        <p className="text-yellow-800">
+          Please log in to the issue tracker in Settings to push tickets.
         </p>
       </div>
     );

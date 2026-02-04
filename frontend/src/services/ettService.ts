@@ -4,11 +4,12 @@
  * Handles integration with the ETT issue tracker API for creating
  * tickets from meeting summaries.
  *
- * CONFIG IS STORED LOCALLY - users must configure their own credentials
- * via the settings UI. No credentials are baked into the source code.
+ * - API URL is set via .env (NEXT_PUBLIC_ETT_API_URL)
+ * - User authenticates at runtime when enabling ticket generation
+ * - Token stored in localStorage
  */
 
-const ETT_CONFIG_KEY = 'ett_config';
+const ETT_AUTH_KEY = 'ett_auth';
 
 // Types matching ETT issue tracker schema
 export interface ETTIssue {
@@ -59,92 +60,142 @@ export interface CreateIssueRequest {
   label_ids?: number[];
 }
 
-export interface ETTConfig {
-  apiUrl: string;
+export interface ETTAuthState {
   accessToken: string;
-  defaultBoardId?: number;
-  defaultReporterId?: number;
+  refreshToken?: string;
+  userId: number;
+  userName: string;
+  expiresAt?: number;
 }
 
 /**
  * ETT Issue Tracker Service
- * Manages communication with ETT-main-service API
  *
- * Config is stored in localStorage - each user must configure their own
- * ETT instance URL and credentials via the settings UI.
+ * API URL from env, auth at runtime via login.
  */
 export class ETTService {
-  private config: ETTConfig | null = null;
+  private apiUrl: string;
+  private auth: ETTAuthState | null = null;
 
   constructor() {
-    // Load config from localStorage on init
-    this.loadConfig();
+    this.apiUrl = process.env.NEXT_PUBLIC_ETT_API_URL || '';
+    this.loadAuth();
   }
 
   /**
-   * Load config from localStorage
+   * Load auth from localStorage
    */
-  private loadConfig(): void {
+  private loadAuth(): void {
     if (typeof window === 'undefined') return;
 
-    const stored = localStorage.getItem(ETT_CONFIG_KEY);
+    const stored = localStorage.getItem(ETT_AUTH_KEY);
     if (stored) {
       try {
-        this.config = JSON.parse(stored);
+        this.auth = JSON.parse(stored);
       } catch {
-        this.config = null;
+        this.auth = null;
       }
     }
   }
 
   /**
-   * Configure the ETT service with API credentials
-   * Saves to localStorage for persistence
+   * Save auth to localStorage
    */
-  configure(config: ETTConfig): void {
-    this.config = config;
+  private saveAuth(auth: ETTAuthState): void {
+    this.auth = auth;
     if (typeof window !== 'undefined') {
-      localStorage.setItem(ETT_CONFIG_KEY, JSON.stringify(config));
+      localStorage.setItem(ETT_AUTH_KEY, JSON.stringify(auth));
     }
   }
 
   /**
-   * Clear stored configuration
+   * Check if API URL is configured
    */
-  clearConfig(): void {
-    this.config = null;
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem(ETT_CONFIG_KEY);
-    }
+  hasApiUrl(): boolean {
+    return !!this.apiUrl;
   }
 
   /**
-   * Check if service is configured
+   * Check if user is authenticated
    */
-  isConfigured(): boolean {
-    return this.config !== null && !!this.config.apiUrl && !!this.config.accessToken;
+  isAuthenticated(): boolean {
+    return !!this.auth?.accessToken;
   }
 
   /**
-   * Get current configuration (without exposing access token)
+   * Get current auth state (without exposing token)
    */
-  getConfig(): Omit<ETTConfig, 'accessToken'> & { hasToken: boolean } | null {
-    if (!this.config) return null;
+  getAuthState(): { isAuthenticated: boolean; userName?: string; userId?: number } {
     return {
-      apiUrl: this.config.apiUrl,
-      defaultBoardId: this.config.defaultBoardId,
-      defaultReporterId: this.config.defaultReporterId,
-      hasToken: !!this.config.accessToken,
+      isAuthenticated: this.isAuthenticated(),
+      userName: this.auth?.userName,
+      userId: this.auth?.userId,
     };
   }
 
+  /**
+   * Get API URL
+   */
+  getApiUrl(): string {
+    return this.apiUrl;
+  }
+
+  /**
+   * Login to ETT with username/password
+   */
+  async login(username: string, password: string): Promise<{ success: boolean; message: string }> {
+    if (!this.apiUrl) {
+      return { success: false, message: 'API URL not configured. Check .env file.' };
+    }
+
+    try {
+      const response = await fetch(`${this.apiUrl}/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ message: 'Login failed' }));
+        return { success: false, message: error.message || 'Invalid credentials' };
+      }
+
+      const data = await response.json();
+
+      // Store auth state
+      this.saveAuth({
+        accessToken: data.access_token,
+        refreshToken: data.refresh_token,
+        userId: data.user_id || data.id,
+        userName: data.username || data.name || username,
+      });
+
+      return { success: true, message: 'Logged in successfully' };
+    } catch (error) {
+      return {
+        success: false,
+        message: error instanceof Error ? error.message : 'Connection failed',
+      };
+    }
+  }
+
+  /**
+   * Logout - clear stored auth
+   */
+  logout(): void {
+    this.auth = null;
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(ETT_AUTH_KEY);
+    }
+  }
+
   private getHeaders(): HeadersInit {
-    if (!this.config) {
-      throw new Error('ETT Service not configured. Call configure() first.');
+    if (!this.auth?.accessToken) {
+      throw new Error('Not authenticated. Please login first.');
     }
     return {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${this.config.accessToken}`,
+      'Authorization': `Bearer ${this.auth.accessToken}`,
     };
   }
 
@@ -152,11 +203,14 @@ export class ETTService {
     endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
-    if (!this.config) {
-      throw new Error('ETT Service not configured. Call configure() first.');
+    if (!this.apiUrl) {
+      throw new Error('API URL not configured. Check .env file.');
+    }
+    if (!this.isAuthenticated()) {
+      throw new Error('Not authenticated. Please login first.');
     }
 
-    const url = `${this.config.apiUrl}${endpoint}`;
+    const url = `${this.apiUrl}${endpoint}`;
     const response = await fetch(url, {
       ...options,
       headers: {
@@ -164,6 +218,12 @@ export class ETTService {
         ...options.headers,
       },
     });
+
+    if (response.status === 401) {
+      // Token expired - clear auth
+      this.logout();
+      throw new Error('Session expired. Please login again.');
+    }
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({ message: 'Unknown error' }));
