@@ -1,0 +1,48 @@
+{
+  "name": "Korean Tech Doc",
+  "description": "Converts Korean meeting transcripts into English technical documentation with actionable tickets for developers.",
+  "sections": [
+    {
+      "title": "Feature Summary",
+      "instruction": "Summarize the requested feature or change in 1-2 sentences in English. Be specific about what the stakeholders want.",
+      "format": "paragraph"
+    },
+    {
+      "title": "Requirements",
+      "instruction": "List all functional requirements extracted from the discussion. Each requirement should be clear and testable.",
+      "format": "list"
+    },
+    {
+      "title": "Acceptance Criteria",
+      "instruction": "Write acceptance criteria in Given/When/Then format. These define when the feature is considered complete.",
+      "format": "list"
+    },
+    {
+      "title": "Open Questions",
+      "instruction": "List any ambiguities, unclear requirements, or items that need stakeholder clarification before development can proceed.",
+      "format": "list"
+    },
+    {
+      "title": "Technical Considerations",
+      "instruction": "Note any technical constraints, API changes, database schema impacts, or architectural decisions mentioned or implied.",
+      "format": "paragraph"
+    },
+    {
+      "title": "Suggested Tickets",
+      "instruction": "Extract actionable development tickets. For each ticket provide: title, description, and priority (urgent/high/medium/low). Format as a table.",
+      "format": "list",
+      "item_format": "| **Title** | Description | Priority |\n| --- | --- | --- |"
+    },
+    {
+      "title": "Out of Scope",
+      "instruction": "List any features or requests that were explicitly marked as out of scope or 'nice to have' for later.",
+      "format": "list"
+    },
+    {
+      "title": "Verbatim Quotes",
+      "instruction": "Include important direct quotes from stakeholders in Korean with English translation. These serve as reference for future disputes.",
+      "format": "list",
+      "item_format": "- **Korean:** \"[quote]\" → **English:** \"[translation]\""
+    }
+  ]
+}
